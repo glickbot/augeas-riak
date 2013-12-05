@@ -1,0 +1,52 @@
+module Riak =
+autoload xfm
+
+let empty = Util.empty_generic /[ \t]*%?[ \t]*/
+
+
+let spc = del /[ \t]+/ " "
+let eol = del /\r?\n/ "\n"
+let comment = Util.comment_generic /[ \t]*%[ \t]*/ "% "
+let comment_eol = Util.comment_generic /[ \t]*%[ \t]*/ " % "
+let comment_or_eol = comment_eol | (del /[ \t]*(%[ \t]*)?\n/ "\n")
+(*
+let comment = [ label "#comment" . del /%+/ "%" . store /[^%\r\n][^\r\n]*[^\r\n \t]/ ]
+let ws = ( empty | comment )*
+*)
+let ws = comment_or_eol
+
+let delim (c:string) = del c c
+
+let comma = delim ","
+let lbrace = delim "{"
+let rbrace = delim "}"
+let lbrack = delim "["
+let rbrack = delim "]"
+let lbin = delim "<<\""
+let rbin = delim "\">>"
+let eoconfig = delim "."
+
+let param_regex = /([a-z0-9-][a-zA-Z0-9_.#-]*)|("([^"\\]*(\\.[^"\\]*)*)")|('([^'\\]*(\\.[^'\\]*)*)')/
+
+let param_regex_key = /([a-z0-9-][a-zA-Z0-9_.#-]*)|"[^"\/\\]*"|'[^'\/\\]*'/
+
+let seq_param = [ seq "param" . store param_regex ]
+
+let fix_value (value:lens) =
+	let list = [ lbrack . (Build.opt_list value comma) . rbrack ] in
+	let proplist = [ lbrace . key Rx.word . comma . lbrack . (Build.opt_list value comma)? . rbrack . rbrace ] in
+	let property = [ lbrace . key param_regex_key . comma . store param_regex . rbrace ] in
+	let tuples = [ seq "tuple" . lbrace . value . comma . value . ( comma . value )+ . rbrace ] in
+	( proplist | list | seq_param | property | tuples | comment )
+
+let rec rlns = fix_value rlns
+
+let lns = rlns . eoconfig
+
+let filter = incl "/etc/riak/app.config"
+
+let xfm = transform lns filter
+
+test lns get "[ atom ]." = ?
+
+test lns get "[ { opt, 1 } ]." = ?
