@@ -47,7 +47,7 @@ module Riak =
 
     let proplist (next:lens) = [ key atom_rx . ws . comma
                                . lbrack
-                               . ( next . ( comma . next )* )
+                               . ( next . ( comma . next )* )?
                                . rbrack ]
 
     let onetuple (next:lens) = [ label "#single_tuple" . (next|any_param) ]
@@ -59,9 +59,15 @@ module Riak =
                 . comma . (next|any_param)
                 . ( comma . (next|any_param) )+ ]
 
-    let proptuple (next:lens) = [ label "#prop_tuple" . store atom_rx . ws
+    let proptuple (next:lens) = [ label "#prop_tuple"
+                                . store atom_rx . ws
                                 . comma
-                                . lbrace . (next|any_param)
+                                . lbrace
+                                . ( prop next
+                                  | proplist next
+                                  | onetuple next
+                                  | twotuple next
+                                  | tuple next )?
                                 . rbrace ]
 
     let list (next:lens) =  [ label "#list"
