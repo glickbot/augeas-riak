@@ -6,6 +6,10 @@ module Test_Riak =
 let test_block = (Riak.opt_eol | Riak.blocks)
 let lns = Riak.lns
 
+let test_prop = (Riak.prop Riak.dummy Riak.dummy)
+
+test test_prop get "{ foo, bar }" = ?
+
 test test_block get "{ foo, bar }" = { "foo" = "bar" }
 test test_block get "{ foo }" = { "1" = "foo" }
 test test_block get "{{foo}, [ foo ]}" = { "1"
