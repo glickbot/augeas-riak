@@ -1,6 +1,7 @@
 module Riak =
     autoload xfm
     
+    let ws_old = del /([ \t]*((%.*)?\n)?)*/ ""
     let ws = del /([ \t]*((%.*)?\n)?)*/ ""
 
     let atom_rx = /[a-z][a-zA-Z0-9_]*/
@@ -9,8 +10,7 @@ module Riak =
     let quoted_rx = /("([^"\\]*(\\.[^"\\]*)*)")|('([^'\\]*(\\.[^'\\]*)*)')/
     let binary_rx = /<<(([^"'<>]*)|("([^"\\]*(\\.[^"\\]*)*)"))*>>/
 
-    let delim (s:string) = del ( s . /([ \t]*((%.*)?\n)?)*/ ) s
-
+    let delim (s:string) = del s s . ws
 
     let comma = delim ","
     let lbrace = delim "{"
@@ -46,9 +46,10 @@ module Riak =
                            . comma . any_param  ]
 
     let proplist (next:lens) = [ key atom_rx . ws . comma
-                               . lbrack
-                               . ( next . ( comma . next )* )?
-                               . rbrack ]
+                               . ( lbrack
+                                   . next . ( comma . next )*
+                                   . rbrack
+                                 | lbrack . rbrack ) ]
 
     let onetuple (next:lens) = [ label "#single_tuple" . (next|any_param) ]
 
@@ -62,18 +63,14 @@ module Riak =
     let proptuple (next:lens) = [ label "#prop_tuple"
                                 . store atom_rx . ws
                                 . comma
-                                . lbrace
-                                . ( prop next
-                                  | proplist next
-                                  | onetuple next
-                                  | twotuple next
-                                  | tuple next )?
-                                . rbrace ]
-
-    let list (next:lens) =  [ label "#list"
-                . ( (next|any_param)
-                . ( comma . (next|any_param) )* )? ]
-
+                                . ( lbrace
+                                  . ( prop next
+                                    | proplist next
+                                    | onetuple next
+                                    | twotuple next
+                                    | tuple next )
+                                  . rbrace
+                                  | lbrace . rbrace ) ]
 
     let element (next:lens) =
         ( ( lbrace . ( prop next
@@ -83,7 +80,11 @@ module Riak =
                  | twotuple next
                  | tuple next )
           . rbrace )
-        | ( lbrack . ( list next ) . rbrack ) )
+        | ( [ label "#list"
+            . ( ( lbrack . (next|any_param)
+                . ( comma . (next|any_param) )*
+                . rbrack )
+              | ( lbrack . rbrack ) ) ] ) )
 
     let rec elements = element elements
 

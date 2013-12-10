@@ -17,7 +17,6 @@ module Test_Riak =
     let proplist = Riak.proplist
     let onetuple = Riak.onetuple
     let twotuple = Riak.twotuple
-    let list = Riak.list
 
     let dummy = [ label "dummy" . store /\./ . ws ]
 
@@ -25,21 +24,23 @@ module Test_Riak =
     test any_param get "\"quoted\"" = { "#str" = "quoted" }
     test any_param get "'squoted'" = { "#qatom" = "squoted" }
     test any_param get "5#16" = { "#num" = "5#16" }
-    (*test any_param get "$\\n" = { "char" = "$\\n" }*)
 
-    let start = "[ { foo, [ {bar, baz} ]} ]."
-
-    test lns get start = { "foo"
-    { "#prop" = "bar"
-      { "#atom" = "baz" }
-    }
+    test lns get "[ % this is a comment
+    { foo, %another comment
+        bar }
+    ].
+    %why comment here?
+    " = { "#prop" = "foo"
+    { "#atom" = "bar" }
+  }
+    
+    test lns get "[ % this is a comment
+    { foo, %another comment
+        bar }
+    ]." = { "#prop" = "foo"
+    { "#atom" = "bar" }
   }
 
-    test lns put start after
-        set "/foo/#prop" "bam" = "[ { foo, [ {bam, baz}]} ]."
-
-    test lns put start after
-        set "/foo/#prop[1]/#atom" "boom" = "[ { foo, [ {bar, boom}]} ]."
 
     (* ---- prop tests ---- *)
 
@@ -47,6 +48,69 @@ module Test_Riak =
     test test_prop get "{foo, bar}" = { "#prop" = "foo"
     { "#atom" = "bar" }
   }
+
+    let spacetest  = "
+[
+ %% Block A
+ {block_a, [
+            %% Option 1
+            { option1 , \"some value\" },
+
+            %% Option 2
+            { option2 , boo }
+
+            %% Comment
+ ]},
+ %% Block B
+ {block_b, [
+            %% Test option 1
+            {option1 , \"this is a value\" },
+
+            %% There was a newline before this.
+            %{ comment, \"shouldn't be parsed\"},
+ 
+            %% Option 2
+            { option2 , 'this is another value' }
+
+            %% Some more descriptions
+ ]},
+ %% Block C
+ {block_c, [
+            %% Test option 1
+            {option1, foo},
+
+            %% Test Option 2
+            {option2, bar}
+
+            %% Comments, comments, comments
+ ]}
+]."
+
+    test lns get spacetest = { "block_a"
+    { "#prop" = "option1"
+      { "#str" = "some value" }
+    }
+    { "#prop" = "option2"
+      { "#atom" = "boo" }
+    }
+  }
+  { "block_b"
+    { "#prop" = "option1"
+      { "#str" = "this is a value" }
+    }
+    { "#prop" = "option2"
+      { "#qatom" = "this is another value" }
+    }
+  }
+  { "block_c"
+    { "#prop" = "option1"
+      { "#atom" = "foo" }
+    }
+    { "#prop" = "option2"
+      { "#atom" = "bar" }
+    }
+  }
+
 
     (* ---- proptupe tests ---- *)
 (*
@@ -160,66 +224,4 @@ module Test_Riak =
       { "#atom" = "atom" }
     }
   }
-
-  (* ---- test list (onetuple|twotuple) ---- *)
-
-    let test_list = lbrack . list (test_onetuple|test_twotuple) . rbrack
-
-    test test_list get "[ a, b, c ]" = { "#list"
-    { "#atom" = "a" }
-    { "#atom" = "b" }
-    { "#atom" = "c" }
-  }
-
-    test test_list get "[ { a }, { b }, { c } ]" = { "#list"
-    { "#single_tuple"
-      { "#atom" = "a" }
-    }
-    { "#single_tuple"
-      { "#atom" = "b" }
-    }
-    { "#single_tuple"
-      { "#atom" = "c" }
-    }
-  }
-  
-    test test_list get "[ {'a',b}, {5, c} ]" = { "#list"
-    { "#double_tuple"
-      { "#qatom" = "a" }
-      { "#atom" = "b" }
-    }
-    { "#double_tuple"
-      { "#num" = "5" }
-      { "#atom" = "c" }
-    }
-  }
-    
-    test test_list get "[ {a}, {4, b} ]" = { "#list"
-    { "#single_tuple"
-      { "#atom" = "a" }
-    }
-    { "#double_tuple"
-      { "#num" = "4" }
-      { "#atom" = "b" }
-    }
-  }
- 
-    test test_list get "[ {one}, {{two}, three}, {'four',{five}} ]" = { "#list"
-    { "#single_tuple"
-      { "#atom" = "one" }
-    }
-    { "#double_tuple"
-      { "#single_tuple"
-        { "#atom" = "two" }
-      }
-      { "#atom" = "three" }
-    }
-    { "#double_tuple"
-      { "#qatom" = "four" }
-      { "#single_tuple"
-        { "#atom" = "five" }
-      }
-    }
-  }
-
 
