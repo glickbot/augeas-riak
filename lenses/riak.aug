@@ -1,104 +1,99 @@
 module Riak =
+    autoload xfm
+    
+    let ws_old = del /([ \t]*((%.*)?\n)?)*/ ""
+    let ws = del /([ \t]*((%.*)?\n)?)*/ ""
 
-autoload xfm
+    let atom_rx = /[a-z][a-zA-Z0-9_]*/
+    let number_rx = /-?[0-9]+((\.[0-9]+(e[0-9]+)?)|(#[0-9a-zA-Z]+))?/
+    (* let char_rx = /$[\\]?[^ \t\n%]/ *)
+    let quoted_rx = /("([^"\\]*(\\.[^"\\]*)*)")|('([^'\\]*(\\.[^'\\]*)*)')/
+    let binary_rx = /<<(([^"'<>]*)|("([^"\\]*(\\.[^"\\]*)*)"))*>>/
 
-let comment_generic = Util.comment_generic
-let del_ws = Util.del_ws " "
-let eol = Util.eol
-let del_str = Util.del_str
+    let delim (s:string) = del s s . ws
 
-let comment = comment_generic /[ \t]*%[ \t]*/ "% "
+    let comma = delim ","
+    let lbrace = delim "{"
+    let rbrace = delim "}"
+    let lbrack = delim "["
+    let rbrack = delim "]"
+    let end_stmt = delim "."
 
-let opt_eol = (del_ws | comment | eol )*
+    let binary = [ label "#bin"
+                 . del /<</ "<<"
+                 . store binary_rx
+                 . del />>/ ">>" . ws ]
 
-let delim (s:string) = del s s . opt_eol
+    let quoted = [ label "#str"
+                 . del /"/ "\""
+                 . store /([^"\\]*(\\.[^"\\]*)*)/
+                 . del /"/ "\"" . ws ]
+    
+    let squoted = [ label "#qatom"
+                 . del /'/ "'"
+                 . store /([^'\\]*(\\.[^'\\]*)*)/
+                 . del /'/ "'" . ws ]
 
-let comma = delim ","
-let lbrace = delim "{"
-let rbrace = delim "}"
-let lbrack = delim "["
-let rbrack = delim "]"
-let lbin = delim "<<\""
-let rbin = delim "\">>"
-let end_stmt = delim "."
+    let atom = [ label "#atom" . store atom_rx . ws ]
+    let number = [ label "#num" . store number_rx . ws ]
+    (* let char = [ label "char" . store char_rx . ws ] *)
 
-let param_regex = /([a-z0-9-][a-zA-Z0-9_.#-]*)|("([^"\\]*(\\.[^"\\]*)*)")|('([^'\\]*(\\.[^'\\]*)*)')/
+    let any_param = (atom|number|quoted|squoted)
+    let not_atom = (number|quoted|squoted)
 
-let param_regex_key = /([a-z0-9-][a-zA-Z0-9_.#-]*)|"[^"\/\\]*"|'[^'\/\\]*'/
+    let prop (next:lens) = [ label "#prop"
+                           . store atom_rx . ws
+                           . comma . any_param  ]
 
-let param_key = key param_regex_key . opt_eol
-let param_store = store param_regex . opt_eol
-let param_path = store (param_regex - param_regex_key) . opt_eol
+    let proplist (next:lens) = [ key atom_rx . ws . comma
+                               . ( lbrack
+                                   . next . ( comma . next )*
+                                   . rbrack
+                                 | lbrack . rbrack ) ]
 
-let param = param_store
+    let onetuple (next:lens) = [ label "#single_tuple" . (next|any_param) ]
 
-let seq_items (s:string) (item:lens) = counter s .
-                                     [ seq s . item ] . 
-                                     ( comma . [ seq s . item ] )*
+    let twotuple (next:lens) =  [ label "#double_tuple" . (next|not_atom)
+                   . comma . (next|any_param) ]
 
-let seq_param = seq_items "param" param
+    let tuple (next:lens) = [ label "#tuple" . (next|any_param)
+                . comma . (next|any_param)
+                . ( comma . (next|any_param) )+ ]
 
-let single_item (s:string) (item:lens) = counter s .
-                                       [ seq s . item ]
+    let proptuple (next:lens) = [ label "#prop_tuple"
+                                . store atom_rx . ws
+                                . comma
+                                . ( lbrace
+                                  . ( prop next
+                                    | proplist next
+                                    | onetuple next
+                                    | twotuple next
+                                    | tuple next )
+                                  . rbrace
+                                  | lbrace . rbrace ) ]
 
-let prop (block:lens) (tuple:lens) =
-    let item = (block | param) in
-                            [ lbrace
-                            . param_key
-                            . comma
-                            . ( param                        (* {foo, bar} *)
-                              | ( lbrack . block?             (* {foo, []} *)
-                                . ( comma . block )*
-                                . rbrack )
-                              | ( lbrack . seq_param . rbrack )
-                              | single_item "prop" tuple     (* {foo, {} *)
-                              | ( [ seq "item" . item ]      (* {foo, bar, baz*)
-                                . ( comma 
-                                  . [ seq "item" . item ] )+ (* 3+ items *)
-                                )
-                              )
-                            . rbrace ]
+    let element (next:lens) =
+        ( ( lbrace . ( prop next
+                 | proplist next
+                 | proptuple next
+                 | onetuple next
+                 | twotuple next
+                 | tuple next )
+          . rbrace )
+        | ( [ label "#list"
+            . ( ( lbrack . (next|any_param)
+                . ( comma . (next|any_param) )*
+                . rbrack )
+              | ( lbrack . rbrack ) ) ] ) )
 
-let list (block:lens) =
-    let item = (block | param) in
-                     lbrack
-                     . (seq_items "list" item)?
-                     . rbrack
+    let rec elements = element elements
 
-let single_tuple (block:lens) =
-    let item = (block | param) in
-                       lbrace
-                       . (single_item "tuple" item)?
-                       . rbrace
+    let lns = ws
+            . lbrack
+            . ( elements . ( comma . elements )* )
+            . rbrack
+            . end_stmt
 
-let non_param_tuple (block:lens) =
-    let item = (block | param) in
-                        lbrace
-                        . counter "tuple"
-                        . [ seq "tuple" . ( block | param_path ) ]
-                        . ( comma . [ seq "tuple" . item ])+
-                        . rbrace
+    let filter = incl "/etc/riak/app.config"
 
-let stuples (items:lens) = ( single_tuple items
-                          | non_param_tuple items )
-
-let lists (items:lens) = list items
-
-let rec tuples = ( stuples ( lists tuples
-                           | stuples tuples
-                           | prop ( tuples|lists tuples ) tuples )
-                 | prop ( tuples | lists tuples ) tuples )
-
-
-let rec blocks = ( lists blocks | tuples )
-
-let lns = opt_eol
-        . lbrack
-        . prop blocks tuples
-        . ( comma . prop blocks tuples )*
-        . rbrack
-        . end_stmt
-
-let filter = incl "/etc/riak/app.config"
-
-let xfm = transform lns filter
+    let xfm = transform lns filter

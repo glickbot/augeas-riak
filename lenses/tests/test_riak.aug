@@ -1,198 +1,227 @@
+module Test_Riak = 
 
-(* Currently only passes with augparse --notypecheck *)
+    let test_element = Riak.elements
 
-module Test_Riak =
+    let lns = Riak.lns
 
-let test_block = (Riak.opt_eol | Riak.blocks)
-let lns = Riak.lns
+    let ws = Riak.ws
+    let lbrace = Riak.lbrace
+    let rbrace = Riak.rbrace
+    let lbrack = Riak.lbrack
+    let rbrack = Riak.rbrack
+    
+    let any_param = Riak.any_param
 
-test test_block get "{ foo, bar }" = { "foo" = "bar" }
-test test_block get "{ foo }" = { "1" = "foo" }
-test test_block get "{{foo}, [ foo ]}" = { "1"
-    { "2" = "foo" }
+    let prop = Riak.prop
+    let proptuple = Riak.proptuple
+    let proplist = Riak.proplist
+    let onetuple = Riak.onetuple
+    let twotuple = Riak.twotuple
+
+    let dummy = [ label "dummy" . store /\./ . ws ]
+
+    test any_param get "atom" = { "#atom" = "atom" }
+    test any_param get "\"quoted\"" = { "#str" = "quoted" }
+    test any_param get "'squoted'" = { "#qatom" = "squoted" }
+    test any_param get "5#16" = { "#num" = "5#16" }
+
+    test lns get "[ % this is a comment
+    { foo, %another comment
+        bar }
+    ].
+    %why comment here?
+    " = { "#prop" = "foo"
+    { "#atom" = "bar" }
   }
-  { "1"
-    { "1" = "foo" }
-  }
-test test_block get "{ foo, [ bar ] }" = { "foo"
-    { "1" = "bar" }
+    
+    test lns get "[ % this is a comment
+    { foo, %another comment
+        bar }
+    ]." = { "#prop" = "foo"
+    { "#atom" = "bar" }
   }
 
-test test_block get "{anti_entropy, {on, []}}" = { "anti_entropy"
-    { "1"
-      { "on" }
+
+    (* ---- prop tests ---- *)
+
+    let test_prop = lbrace . prop dummy . rbrace
+    test test_prop get "{foo, bar}" = { "#prop" = "foo"
+    { "#atom" = "bar" }
+  }
+
+    let spacetest  = "
+[
+ %% Block A
+ {block_a, [
+            %% Option 1
+            { option1 , \"some value\" },
+
+            %% Option 2
+            { option2 , boo }
+
+            %% Comment
+ ]},
+ %% Block B
+ {block_b, [
+            %% Test option 1
+            {option1 , \"this is a value\" },
+
+            %% There was a newline before this.
+            %{ comment, \"shouldn't be parsed\"},
+ 
+            %% Option 2
+            { option2 , 'this is another value' }
+
+            %% Some more descriptions
+ ]},
+ %% Block C
+ {block_c, [
+            %% Test option 1
+            {option1, foo},
+
+            %% Test Option 2
+            {option2, bar}
+
+            %% Comments, comments, comments
+ ]}
+]."
+
+    test lns get spacetest = { "block_a"
+    { "#prop" = "option1"
+      { "#str" = "some value" }
+    }
+    { "#prop" = "option2"
+      { "#atom" = "boo" }
+    }
+  }
+  { "block_b"
+    { "#prop" = "option1"
+      { "#str" = "this is a value" }
+    }
+    { "#prop" = "option2"
+      { "#qatom" = "this is another value" }
+    }
+  }
+  { "block_c"
+    { "#prop" = "option1"
+      { "#atom" = "foo" }
+    }
+    { "#prop" = "option2"
+      { "#atom" = "bar" }
     }
   }
 
-test test_block get "{ foo, [ { bar, baz } ] }" = { "foo"
-    { "bar" = "baz" }
+
+    (* ---- proptupe tests ---- *)
+(*
+    let test_proptuple = lbrace . proptuple dummy . rbrace
+
+    test test_proptuple get "{foo, {foo}}" = { "#prop_tuple" = "foo"
+    { "#single_tuple"
+      { "#atom" = "foo" }
+    }
   }
-test test_block get "{ foo }" = { "1" = "foo" }
-test test_block get "{ { hi } }" = { "1"
-    { "1" = "hi" }
+
+    let test_proptuple2 = lbrace . proptuple (test_prop|test_proptuple) . rbrace
+    
+    test test_proptuple2 get "{foo, {foo}}" =  { "#prop_tuple" = "foo"
+    { "#atom" = "foo" }
   }
-test test_block get "{ {boo}, param }" = { "1"
-    { "2" = "boo" }
+*)
+    (* ---- proplist tests ---- *)
+
+    let test_proplist = lbrace . proplist test_prop . rbrace
+
+    test test_proplist get "{foo, []}" = { "foo" }
+
+    test test_proplist get "{foo, [ {bar, baz}, {bam, baf} ]}" =
+  { "foo"
+    { "#prop" = "bar"
+      { "#atom" = "baz" }
+    }
+    { "#prop" = "bam"
+      { "#atom" = "baf" }
+    }
   }
-  { "1" = "param" }
-test test_block get "{ foo, [ { foo, bar }, { bar, baz } ] }" = { "foo"
-    { "foo" = "bar" }
-    { "bar" = "baz" }
+    
+    test test_proplist get "{foo, [ {bar, \"eighty two\"}, {bam, 38}]}" =  { "foo"
+    { "#prop" = "bar"
+      { "#str" = "eighty two" }
+    }
+    { "#prop" = "bam"
+      { "#num" = "38" }
+    }
   }
-test test_block get "{ foo, bar, baz }" = { "foo"
-    { "2" = "bar" }
-    { "1" = "baz" }
-  }
-test test_block get "{{hi}}" = { "1"
-    { "1" = "hi" }
-  }
-test test_block get "{{hi},{hi}}" = { "1"
-    { "2" = "hi" }
-  }
-  { "1"
-    { "1" = "hi" }
-  }
-test test_block get "{ foo, {foo, bar, baz}}" = 
-{ "foo"
-    { "1"
-      { "foo"
-        { "2" = "bar" }
-        { "1" = "baz" }
+    
+   let test_proplist0 = lbrace . proplist test_proplist . rbrace
+   test test_proplist0 get "{foo, [{foo, [ {bar, \"eighty two\"}, {bam, 38}]}]}" = { "foo"
+    { "foo"
+      { "#prop" = "bar"
+        { "#str" = "eighty two" }
+      }
+      { "#prop" = "bam"
+        { "#num" = "38" }
       }
     }
   }
-test test_block get "{ foo, {foo, bar}, { baz, bam }}" =
-  { "foo"
-    { "2"
-      { "foo" = "bar" }
-    }
-    { "1"
-      { "baz" = "bam" }
-    }
+
+   (* --- multi-prop tests ---- *)
+
+   let test_props = (test_prop|test_proplist)
+
+   test test_props get "{foo, bar}" = { "#prop" = "foo"
+    { "#atom" = "bar" }
+  }
+(*
+   let test_props1 = (test_prop|test_proptuple)
+
+   test test_props1 get "{foo, bar}" = { "#prop" = "foo"
+    { "#atom" = "bar" }
   }
 
-test test_block get "%comment
-" = { "#comment" = "comment" }
+   let test_props3 = (test_proplist|test_proptuple)
 
-test test_block get "{foo, \"bar\"}" = { "foo" = "\"bar\"" }
-test test_block get "{foo, bar}" = { "foo" = "bar" }
-test test_block get "{foo, 10}" = { "foo" = "10" }
-
-test test_block get "[ atom ]" = { "1" = "atom" }
-
-test test_block get "[ atom, \"10.0.0.1\" ]" =
-    { "2" = "atom" }
-    { "1" = "\"10.0.0.1\"" }
-
-test test_block get "[ 
-atom,
-123
-]" =
-    { "2" = "atom" }
-    { "1" = "123" }
-
-test test_block get "[ %something
-atom %something else
-]
-% a final thing
-" = 
-    { "#comment" = "something" }
-    { "1" = "atom"
-      { "#comment" = "something else" }
-    }
-    { "#comment" = "a final thing" }
-
-test test_block get "[ {foo,bar}, {baz,bam} ]" =
-  { "2"
-    { "foo" = "bar" }
-  }
-  { "1"
-    { "baz" = "bam" }
-  }
-
-let hi_5 = { "1" { "hi" = "5" } }
-
-test test_block get "[{hi,5}]" = hi_5
-test test_block get "[ {hi,5} ] " = hi_5
-test test_block get "[ { hi, 5} ] " = hi_5
-test test_block get "[ {hi ,5 } ] " = hi_5
-
-test test_block get "{ \"123\", foo, bar }" =
-  { "\"123\""
-    { "2" = "foo" }
-    { "1" = "bar" }
-  }
-
-test test_block get "{ \"127.0.0.1\", 80 }" =
-  { "\"127.0.0.1\"" = "80" }
-
-test test_block get "[ {\"127.0.0.1\", 80}, {foo, bar} ]" =
-  { "2"
-    { "\"127.0.0.1\"" = "80" }
-  }
-  { "1"
-    { "foo" = "bar" }
-  }
-
-test test_block get "{foo, [ {bar, baz} ]}" = 
-  {"foo"
-      { "bar" = "baz" }
-  }
-
-test test_block get "{foo, [ {bar, [{\"127.0.0.1\", 80}]}]}" =
-  { "foo"
-    { "bar"
-      { "\"127.0.0.1\"" = "80" }
+   test test_props3 get "{foo, [{bar, baz}]}" =  { "foo"
+    { "#prop" = "bar"
+      { "#atom" = "baz" }
     }
   }
+*)
+   (* ---- onetuple tests ---- *)
+    
+    let test_onetuple = lbrace . onetuple test_proplist . rbrace
 
-test lns get "[ { foo, bar } ]." =
-    { "foo" = "bar" }
+    test test_onetuple get "{bar}" = { "#single_tuple"
+    { "#atom" = "bar" }
+    }
 
-test lns get "[ { foo, [ { bar, baz } ] } ]." = 
-{ "foo"
-    { "bar" = "baz" }
-}
+    test test_onetuple get "{'quoted'}" = { "#single_tuple" { "#qatom" = "quoted"}}
 
-test lns get "[
-{ proplist1, [
-    { opt1, 1 },
-    { opt2, \"2\" },
-    { opt3, three }
-]},
-{ proplist2, [
-    { opt1, 22 },
-    { opt2, \"23\" },
-    { opt3, twentyfour }
-]}
-]." = { "proplist1"
-    { "opt1" = "1" }
-    { "opt2" = "\"2\"" }
-    { "opt3" = "three" }
+    (* ---- twotuple (onetuple) tests ---- *)
+
+    let test_twotuple = lbrace . twotuple test_onetuple . rbrace
+
+    test test_twotuple get "{'foo', bar}" = { "#double_tuple"
+    { "#qatom" = "foo" }
+    { "#atom" = "bar" }
   }
-  { "proplist2"
-    { "opt1" = "22" }
-    { "opt2" = "\"23\"" }
-    { "opt3" = "twentyfour" }
+    test test_twotuple get "{5, bar}" = {
+         "#double_tuple" {"#num" = "5"}{"#atom"="bar"}
+         }
+
+    test test_twotuple get "{{atom}, bar}" = { "#double_tuple"
+    { "#single_tuple"
+      { "#atom" = "atom" }
+    }
+    { "#atom" = "bar" }
   }
 
-test test_block get "{handlers, [
-    {lager_file_backend, [
-        {\"/var/log/riak/error.log\", error, 10485760, \"\", 5},
-        {\"/var/log/riak/console.log\", info, 10485760, \"\", 5}
-        ]}
-    ]}" = { "handlers"
-    { "lager_file_backend"
-      { "5" = "\"/var/log/riak/error.log\"" }
-      { "4" = "error" }
-      { "3" = "10485760" }
-      { "2" = "\"\"" }
-      { "1" = "5" }
-      { "5" = "\"/var/log/riak/console.log\"" }
-      { "4" = "info" }
-      { "3" = "10485760" }
-      { "2" = "\"\"" }
-      { "1" = "5" }
+    test test_twotuple get "{{atom},{atom}}" = { "#double_tuple"
+    { "#single_tuple"
+      { "#atom" = "atom" }
+    }
+    { "#single_tuple"
+      { "#atom" = "atom" }
     }
   }
 
